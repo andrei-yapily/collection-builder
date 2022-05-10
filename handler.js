@@ -3,10 +3,30 @@ var fs = require('fs');
 const HEAD = fs.readFileSync('test_src/head.js', { encoding: 'UTF8' });
 // const HEADER2 = fs.readFileSync('test_src/new.js', { encoding: 'UTF8' });
 
-class Handler {
-    constructor() {
+COLL_VARS_KEYS = {
+    APP_ID: "application_client_id", APP_SEC: "application_client_secret", USER_UUID: "user-uuid"
+}
 
+class CollVariable {
+
+    constructor(name, def){
+        this.name = name 
+        this.default= def
     }
+}
+
+class Handler {
+
+    
+    constructor() {
+        
+    }
+    
+    COLL_VARS = [
+        new CollVariable(COLL_VARS_KEYS.USER_UUID, ''),
+        new CollVariable(COLL_VARS_KEYS.APP_ID, 'replace-me'),
+        new CollVariable(COLL_VARS_KEYS.APP_SEC, 'replace-me')
+    ]
 
     uuidv4() {
         return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
@@ -57,13 +77,25 @@ class Handler {
     updateAuth(result){
         console.log("Updating auth for collection.")
         var [auth_username, auth_password] = result.auth.basic
-        auth_username.value = "{{application_client_id}}"
-        auth_password.value = "{{application_client_secret}}"
+        auth_username.value = "{{" + COLL_VARS_KEYS.APP_ID + "}}"
+        auth_password.value = "{{" + COLL_VARS_KEYS.APP_SEC + "}}"
         console.log("Updated auth for collection." ,auth_username, auth_password)
+    }
+
+    updateVariables(result){
+        var variables = result.variable
+        this.COLL_VARS.forEach(v => {
+            variables.push({
+                type: 'string',
+                key: v.name,
+                value: v.default
+            })
+            console.log(v);});
     }
 
     convertCollection(result) {
         this.updateAuth(result)
+        this.updateVariables(result)
         var items = result.item
         for (var i = 0; i < items.length; i++) {
             var category = items[i]
