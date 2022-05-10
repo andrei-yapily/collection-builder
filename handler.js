@@ -15,7 +15,7 @@ class Handler {
     }
 
     addEvents(category) {
-        console.log('\nAdding tests to group [' + category.name + ']')
+        console.log('Adding tests to group [' + category.name + ']')
         var requests = category.item
         for (var i = 0; i < requests.length; i++) {
             var request = requests[i]
@@ -23,6 +23,7 @@ class Handler {
             var events = [this.generate_event(request.name, 'test')]
             request.events = events;
         }
+        console.log('\n')
     }
 
     // adding events based on listener - accounts for event and request scenario
@@ -42,7 +43,8 @@ class Handler {
     }
 
     get_event(request_name) {
-        var folders = ["user", "account", "consents"]
+        console.log('Fetching tests for request [' + request_name + ']')
+        var folders = ["user", "account", "consent"]
         var folder = folders.filter(v => request_name.includes(v))[0]
         var path = './test_src/' + folder + '/' + request_name + '.js'
         if (fs.existsSync(path)) {
@@ -52,7 +54,16 @@ class Handler {
         return ''
     }
 
+    updateAuth(result){
+        console.log("Updating auth for collection.")
+        var [auth_username, auth_password] = result.auth.basic
+        auth_username.value = "{{application_client_id}}"
+        auth_password.value = "{{application_client_secret}}"
+        console.log("Updated auth for collection." ,auth_username, auth_password)
+    }
+
     convertCollection(result) {
+        this.updateAuth(result)
         var items = result.item
         for (var i = 0; i < items.length; i++) {
             var category = items[i]

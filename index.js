@@ -2,10 +2,11 @@ var fs = require('fs');
 var Handler = require('./handler');
 var Converter = require('openapi-to-postmanv2');
 openapiData = fs.readFileSync('sample.json', { encoding: 'UTF8' });
-
+const OUTPUT = 'test.json'
 
 var h = new Handler();
-// fs.unlinkSync('test.json');
+if (fs.existsSync(OUTPUT))
+    fs.unlinkSync(OUTPUT);
 
 Converter.convert({ type: 'string', data: openapiData },
     {
