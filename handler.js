@@ -9,19 +9,27 @@ COLL_VARS_KEYS = {
 
 class CollVariable {
 
-    constructor(name, def){
-        this.name = name 
-        this.default= def
+    constructor(name, def) {
+        this.name = name
+        this.default = def
     }
 }
 
 class Handler {
 
-    
+
     constructor() {
-        
+
     }
-    
+
+    FOLDERS = [
+        { path: "user" },
+        { path: "account" },
+        { path: "consent" },
+        { path: "identity" },
+        { path: "payment" },
+    ]
+
     COLL_VARS = [
         new CollVariable(COLL_VARS_KEYS.USER_UUID, ''),
         new CollVariable(COLL_VARS_KEYS.APP_ID, 'replace-me'),
@@ -40,16 +48,17 @@ class Handler {
         for (var i = 0; i < requests.length; i++) {
             var request = requests[i]
             console.log('Adding tests to request [' + request.name + ']')
-            var events = [this.generate_event(request.name, 'test')]
+            var events = [this.generate_event(request, 'test')]
             request.events = events;
         }
         console.log('\n')
     }
 
     // adding events based on listener - accounts for event and request scenario
-    generate_event(request_name, listen) {
-        var mapped = request_name.toLowerCase().replaceAll(' ', '_')
-        var script_text = HEAD + this.get_event(mapped);
+    generate_event(request, listen) {
+        var mapped = request.name.toLowerCase().replaceAll(' ', '_')
+        console.log("\nAdded Header test to ["+request.name+"]")
+        var script_text = HEAD + this.get_event({ request, mapped });
         var test = {
             "listen": listen,
             "script": {
@@ -62,27 +71,28 @@ class Handler {
         return test;
     }
 
-    get_event(request_name) {
-        console.log('Fetching tests for request [' + request_name + ']')
-        var folders = ["user", "account", "consent"]
-        var folder = folders.filter(v => request_name.includes(v))[0]
-        var path = './test_src/' + folder + '/' + request_name + '.js'
-        if (fs.existsSync(path)) {
-            console.log("Adding test from " + path)
-            return fs.readFileSync(path, { encoding: 'UTF8' });
+    get_event(request) {
+        console.log('Fetching tests for request [' + request.mapped + ']')
+        var folder = this.FOLDERS.filter(v => request.mapped.includes(v.path))[0]
+        if (folder != undefined) {
+            var path = './test_src/' + folder.path + '/' + request.mapped + '.js'
+            if (fs.existsSync(path)) {
+                console.log("Adding test from [" + path + "] \n")
+                return fs.readFileSync(path, { encoding: 'UTF8' });
+            }
         }
         return ''
     }
 
-    updateAuth(result){
+    updateAuth(result) {
         console.log("Updating auth for collection.")
         var [auth_username, auth_password] = result.auth.basic
         auth_username.value = "{{" + COLL_VARS_KEYS.APP_ID + "}}"
         auth_password.value = "{{" + COLL_VARS_KEYS.APP_SEC + "}}"
-        console.log("Updated auth for collection." ,auth_username, auth_password)
+        console.log("Updated auth for collection.", auth_username, auth_password)
     }
 
-    updateVariables(result){
+    updateVariables(result) {
         var variables = result.variable
         this.COLL_VARS.forEach(v => {
             variables.push({
@@ -90,7 +100,8 @@ class Handler {
                 key: v.name,
                 value: v.default
             })
-            console.log(v);});
+            console.log("Added collection variable: [" + v.toString() + "]");
+        });
     }
 
     convertCollection(result) {
