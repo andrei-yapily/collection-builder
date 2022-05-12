@@ -4,7 +4,18 @@ const HEAD = fs.readFileSync('test_src/head.js', { encoding: 'UTF8' });
 // const HEADER2 = fs.readFileSync('test_src/new.js', { encoding: 'UTF8' });
 
 COLL_VARS_KEYS = {
-    APP_ID: "application_client_id", APP_SEC: "application_client_secret", USER_UUID: "user-uuid"
+    // KEY: [KEY_NAME, IGNORE - don't fill in with empty value]
+    APP_ID: ["application_client_id", true],
+    APP_SEC: ["application_client_secret", true],
+    USER_UUID: ["user-uuid", false],
+    USERS_AMOUNT: ["users-amount", false],
+    CONSENT_ID: ["consent-id", false],
+    TRANSACTION_ID: ["transaction-id", false],
+    ACCOUNT_ID: ["account-id", false],
+    CONSENT_TOKEN: ["consent-token", false],
+    CONSENT_AMOUNT: ["consent-amount", false],
+    CONSENT_ID: ["consent-id", false],
+    PAYMENT_ID: ["payment-id", false],
 }
 
 class CollVariable {
@@ -17,9 +28,16 @@ class CollVariable {
 
 class Handler {
 
-
     constructor() {
-
+        var values = []
+        console.log("Initialising collection values")
+        Object.keys(COLL_VARS_KEYS).forEach((var_key) => {
+            var key = COLL_VARS_KEYS[var_key]
+            values.push(
+                new CollVariable(key[0], key[1] ? "replace-me" : "")
+            )
+        })
+        this.COLL_VARS = values
     }
 
     FOLDERS = [
@@ -30,11 +48,17 @@ class Handler {
         { path: "payment" },
     ]
 
-    COLL_VARS = [
-        new CollVariable(COLL_VARS_KEYS.USER_UUID, ''),
-        new CollVariable(COLL_VARS_KEYS.APP_ID, 'replace-me'),
-        new CollVariable(COLL_VARS_KEYS.APP_SEC, 'replace-me')
-    ]
+    // utility lambdas
+    camelToSnakeCase = str => str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    kebabize = str => {
+        return str.split('').map((letter, idx) => {
+            return letter.toUpperCase() === letter
+                ? `${idx !== 0 ? '-' : ''}${letter.toLowerCase()}`
+                : letter;
+        }).join('');
+    }
+    parametrize = str => "{{" + str + "}}"
+
 
     uuidv4() {
         return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
@@ -47,6 +71,7 @@ class Handler {
         var requests = category.item
         for (var i = 0; i < requests.length; i++) {
             var request = requests[i]
+            this.cleanOASVariables(request.request)
             console.log('Adding tests to request [' + request.name + ']')
             var events = [this.generate_event(request, 'test')]
             request.events = events;
@@ -57,7 +82,7 @@ class Handler {
     // adding events based on listener - accounts for event and request scenario
     generate_event(request, listen) {
         var mapped = request.name.toLowerCase().replaceAll(' ', '_')
-        console.log("\nAdded Header test to ["+request.name+"]")
+        console.log("\nAdded Header test to [" + request.name + "]")
         var script_text = HEAD + this.get_event({ request, mapped });
         var test = {
             "listen": listen,
@@ -87,8 +112,8 @@ class Handler {
     updateAuth(result) {
         console.log("Updating auth for collection.")
         var [auth_username, auth_password] = result.auth.basic
-        auth_username.value = "{{" + COLL_VARS_KEYS.APP_ID + "}}"
-        auth_password.value = "{{" + COLL_VARS_KEYS.APP_SEC + "}}"
+        auth_username.value = this.parametrize(COLL_VARS_KEYS.APP_ID[0])
+        auth_password.value = this.parametrize(COLL_VARS_KEYS.APP_SEC[0])
         console.log("Updated auth for collection.", auth_username, auth_password)
     }
 
@@ -100,13 +125,36 @@ class Handler {
                 key: v.name,
                 value: v.default
             })
-            console.log("Added collection variable: [" + v.toString() + "]");
+            console.log("Added collection variable: [" + v.name + "]");
         });
     }
 
+    cleanOASVariables(request) {
+        var variables = request.url
+        console.log('Cleaning path and query vars for [' + request.name + ']')
+        variables.query = []
+        var pathVarValue = variables.path
+        if (pathVarValue != undefined) {
+            var config = pathVarValue.map(path => {
+                if (path.includes(":")) {
+                    var keyVal = path.substring(1)
+                    var kebab = this.kebabize(keyVal)
+                    var collVar = this.COLL_VARS.filter(v => v.name == kebab)
+                    if(collVar[0] != undefined){
+                        collVar = collVar[0]
+                        var variable = variables.variable.filter(va => va.key == keyVal)[0]
+                        variable.value = this.parametrize(collVar.name)
+                    }
+                    return collVar
+                }
+            });
+            console.log(config)
+        }
+    }
+
     convertCollection(result) {
-        this.updateAuth(result)
         this.updateVariables(result)
+        this.updateAuth(result)
         var items = result.item
         for (var i = 0; i < items.length; i++) {
             var category = items[i]
