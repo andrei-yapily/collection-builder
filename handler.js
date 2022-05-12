@@ -1,22 +1,36 @@
 var crypto = require('crypto');
 var fs = require('fs');
 const HEAD = fs.readFileSync('test_src/head.js', { encoding: 'UTF8' });
-// const HEADER2 = fs.readFileSync('test_src/new.js', { encoding: 'UTF8' });
 
 COLL_VARS_KEYS = {
     // KEY: [KEY_NAME, IGNORE - don't fill in with empty value]
     APP_ID: ["application_client_id", true],
     APP_SEC: ["application_client_secret", true],
     USER_UUID: ["user-uuid", false],
+    APPLICATION_USER_UUID: ["application-user-id", false],
+    // test
+    ACCOUNT_ID: ["account-id", false],
+    // INSTITUTION_ID: ["institution-id", false],
     USERS_AMOUNT: ["users-amount", false],
     CONSENT_ID: ["consent-id", false],
     TRANSACTION_ID: ["transaction-id", false],
-    ACCOUNT_ID: ["account-id", false],
+    ACCOUNT_ID: ["account-request-account-identifiers-for-balance-account-id", false],
     CONSENT_TOKEN: ["consent-token", false],
     CONSENT_AMOUNT: ["consent-amount", false],
     CONSENT_ID: ["consent-id", false],
     PAYMENT_ID: ["payment-id", false],
+    PAYMENT_IDEMPOTENCY_ID: ["payments-payment-idempotency-id", false],
+    // amounts
+    BULK_PAYMENT_AMOUNT: ['payments-amount-amount', false],
+    PAYMENT_AUTH_PAYMENT_AMOUNT: ['payment-request-amount-amount', false],
+    BULK_PAYMENT_AUTH_PAYMENT_AMOUNT: ['payment-request-payments-amount-amount', false],
+    // currency
+    BULK_PAYMENT_CURRENCY: ['payments-amount-currency', false],
+    PAYMENT_AUTH_PAYMENT_CURRENCY: ['payment-request-amount-currency', false],
+    BULK_PAYMENT_AUTH_PAYMENT_CURRENCY: ['payment-request-payments-amount-currency', false]
 }
+
+SEPARATOR = '.'
 
 class CollVariable {
 
@@ -50,6 +64,7 @@ class Handler {
 
     // utility lambdas
     camelToSnakeCase = str => str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    // converts camelCase to kebab
     kebabize = str => {
         return str.split('').map((letter, idx) => {
             return letter.toUpperCase() === letter
@@ -58,6 +73,13 @@ class Handler {
         }).join('');
     }
     parametrize = str => "{{" + str + "}}"
+    getType = p => {
+        if (Array.isArray(p)) return 'array';
+        else if (typeof p == 'string') return 'string';
+        else if (p != null && typeof p == 'object') return 'object';
+        else if (p !== undefined && p !== null && p.constructor == Number) return 'number';
+        else return 'other';
+    }
 
 
     uuidv4() {
@@ -71,7 +93,9 @@ class Handler {
         var requests = category.item
         for (var i = 0; i < requests.length; i++) {
             var request = requests[i]
-            this.cleanOASVariables(request.request)
+            this.cleanOASPathVariables(request.request)
+            this.cleanOASBodyVariables(request.request)
+            this.cleanOASQueryParams(request.request)
             console.log('Adding tests to request [' + request.name + ']')
             var events = [this.generate_event(request, 'test')]
             request.events = events;
@@ -109,16 +133,16 @@ class Handler {
         return ''
     }
 
-    updateAuth(result) {
+    updateAuth(converted_collection) {
         console.log("Updating auth for collection.")
-        var [auth_username, auth_password] = result.auth.basic
+        var [auth_username, auth_password] = converted_collection.auth.basic
         auth_username.value = this.parametrize(COLL_VARS_KEYS.APP_ID[0])
         auth_password.value = this.parametrize(COLL_VARS_KEYS.APP_SEC[0])
         console.log("Updated auth for collection.", auth_username, auth_password)
     }
 
-    updateVariables(result) {
-        var variables = result.variable
+    updateVariables(converted_collection) {
+        var variables = converted_collection.variable
         this.COLL_VARS.forEach(v => {
             variables.push({
                 type: 'string',
@@ -129,18 +153,24 @@ class Handler {
         });
     }
 
-    cleanOASVariables(request) {
+    cleanOASQueryParams(request) {
         var variables = request.url
-        console.log('Cleaning path and query vars for [' + request.name + ']')
+        console.log('Cleaning query vars for [' + request.name + ']')
         variables.query = []
+    }
+
+    cleanOASPathVariables(request) {
+        var variables = request.url
+        console.log('Cleaning path vars for [' + request.name + ']')
         var pathVarValue = variables.path
         if (pathVarValue != undefined) {
-            var config = pathVarValue.map(path => {
+            // TODO: can be exported as config
+            pathVarValue.map(path => {
                 if (path.includes(":")) {
                     var keyVal = path.substring(1)
                     var kebab = this.kebabize(keyVal)
                     var collVar = this.COLL_VARS.filter(v => v.name == kebab)
-                    if(collVar[0] != undefined){
+                    if (collVar[0] != undefined && collVar.length > 0) {
                         collVar = collVar[0]
                         var variable = variables.variable.filter(va => va.key == keyVal)[0]
                         variable.value = this.parametrize(collVar.name)
@@ -148,23 +178,79 @@ class Handler {
                     return collVar
                 }
             });
-            console.log(config)
         }
     }
 
-    convertCollection(result) {
-        this.updateVariables(result)
-        this.updateAuth(result)
-        var items = result.item
+    parametrizeKey(key) {
+        var kebab = this.kebabize(key).replaceAll(SEPARATOR, '')
+        var collVar = this.COLL_VARS.filter(v => v.name == kebab)
+        if (collVar[0] != undefined && collVar.length > 0) {
+            collVar = collVar[0]
+            return this.parametrize(collVar.name)
+        }
+        return ''
+    }
+
+    convertValues(key, value) {
+        if (value != null) {
+            var type = this.getType(value)
+            console.log("Converting [" + type + "] for [" + key + "]")
+            switch (type) {
+                default:
+                    console.log("undefined", value)
+                case "number":
+                case "string":
+                    value = this.parametrizeKey(key)
+                    break
+                case "object":
+                    Object.keys(value).forEach(valueKey => {
+                        var convertedVal = this.convertValues(key + SEPARATOR + valueKey, value[valueKey])
+                        if (convertedVal != undefined && convertedVal != '') {
+                            value[valueKey] = convertedVal
+                        }
+                    })
+                    break
+                case "array":
+                    var items = value
+                    value = items.map(v => this.convertValues(key, v))
+                    break
+            }
+            return value
+        }
+    }
+
+    cleanOASBodyVariables(request) {
+        if (request.method == 'POST') {
+            console.log('Cleaning body for [' + request.name + ']')
+            var body = request.body;
+            if (body != undefined) {
+                var text = JSON.parse(body.raw.replaceAll('\\n', ''))
+                Object.keys(text).forEach(key => {
+                    var value = this.convertValues(key, text[key])
+                    if (value != '') {
+                        console.log("Updated value for [" + key + "] to [" + value + "]")
+                        text[key] = value
+                    }
+                })
+                body.raw = JSON.stringify(text);
+            }
+        }
+
+    }
+
+    convertCollection(converted_collection) {
+        this.updateVariables(converted_collection)
+        this.updateAuth(converted_collection)
+        var items = converted_collection.item
         for (var i = 0; i < items.length; i++) {
             var category = items[i]
             if (category.item != undefined) {
                 this.addEvents(category)
             }
         }
-        result.items = items.filter(i => i.item != undefined)
-        // console.log('The collection object is: ', result);
-        fs.writeFileSync('test.json', JSON.stringify(result));
+        converted_collection.items = items.filter(i => i.item != undefined)
+        // console.log('The collection object is: ', converted_collection);
+        fs.writeFileSync('test.json', JSON.stringify(converted_collection));
     }
 }
 
