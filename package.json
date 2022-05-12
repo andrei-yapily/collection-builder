@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "node index.js"
+    "build": "node index.js --input=spec.json --output='output/collection.json'"
   },
   "author": "",
   "license": "ISC",
