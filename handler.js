@@ -8,26 +8,33 @@ COLL_VARS_KEYS = {
     APP_SEC: ["application_client_secret", true],
     USER_UUID: ["user-uuid", false],
     APPLICATION_USER_UUID: ["application-user-id", false],
-    // test
-    ACCOUNT_ID: ["account-id", false],
-    // INSTITUTION_ID: ["institution-id", false],
+    INSTITUTION_ID: ["institution-id", false],
     USERS_AMOUNT: ["users-amount", false],
     CONSENT_ID: ["consent-id", false],
     TRANSACTION_ID: ["transaction-id", false],
-    ACCOUNT_ID: ["account-request-account-identifiers-for-balance-account-id", false],
     CONSENT_TOKEN: ["consent-token", false],
     CONSENT_AMOUNT: ["consent-amount", false],
     CONSENT_ID: ["consent-id", false],
     PAYMENT_ID: ["payment-id", false],
+    // accounts
+    ACCOUNT_ID_BALANCE: ["account-request-account-identifiers-for-balance-account-id", false],
+    ACCOUNT_ID_TRANS: ["account-request-account-identifiers-for-transaction-account-id", false],
+    // payments
     PAYMENT_IDEMPOTENCY_ID: ["payments-payment-idempotency-id", false],
-    // amounts
+    // payment amounts
     BULK_PAYMENT_AMOUNT: ['payments-amount-amount', false],
     PAYMENT_AUTH_PAYMENT_AMOUNT: ['payment-request-amount-amount', false],
     BULK_PAYMENT_AUTH_PAYMENT_AMOUNT: ['payment-request-payments-amount-amount', false],
-    // currency
+    // payment currency
     BULK_PAYMENT_CURRENCY: ['payments-amount-currency', false],
     PAYMENT_AUTH_PAYMENT_CURRENCY: ['payment-request-amount-currency', false],
-    BULK_PAYMENT_AUTH_PAYMENT_CURRENCY: ['payment-request-payments-amount-currency', false]
+    BULK_PAYMENT_AUTH_PAYMENT_CURRENCY: ['payment-request-payments-amount-currency', false],
+
+    // HEADER VALS
+    HEADER_CONSENT: ['header-consent', true],
+    HEADER_PSU: ['header-psu-id', true],
+    HEADER_PSU_COPR_ID: ['header-psu-corporate-id', true],
+    HEADER_PSU_IP_ADD: ['header-psu-ip-address', true],
 }
 
 SEPARATOR = '.'
@@ -67,13 +74,14 @@ class Handler {
     // converts camelCase to kebab
     kebabize = str => {
         return str.split('').map((letter, idx) => {
-            return letter.toUpperCase() === letter
+            return letter.toUpperCase() === letter && letter != '-'
                 ? `${idx !== 0 ? '-' : ''}${letter.toLowerCase()}`
                 : letter;
         }).join('');
     }
     parametrize = str => "{{" + str + "}}"
     getType = p => {
+        // TODO: Refactor to enums
         if (Array.isArray(p)) return 'array';
         else if (typeof p == 'string') return 'string';
         else if (p != null && typeof p == 'object') return 'object';
@@ -81,6 +89,43 @@ class Handler {
         else return 'other';
     }
 
+    parametrizeKey = key => {
+        var kebab = this.kebabize(key).replaceAll(SEPARATOR, '')
+        var collVar = this.COLL_VARS.filter(v => v.name == kebab)
+        if (collVar[0] != undefined && collVar.length > 0) {
+            collVar = collVar[0]
+            return this.parametrize(collVar.name)
+        }
+        return ''
+    }
+
+    convertValues = (key, value) => {
+        if (value != null) {
+            var type = this.getType(value)
+            console.log("Converting [" + type + "] for [" + key + "]")
+            switch (type) {
+                default:
+                    console.log("undefined", value)
+                case "number":
+                case "string":
+                    value = this.parametrizeKey(key)
+                    break
+                case "object":
+                    Object.keys(value).forEach(valueKey => {
+                        var convertedVal = this.convertValues(key + SEPARATOR + valueKey, value[valueKey])
+                        if (convertedVal != undefined && convertedVal != '') {
+                            value[valueKey] = convertedVal
+                        }
+                    })
+                    break
+                case "array":
+                    var items = value
+                    value = items.map(v => this.convertValues(key, v))
+                    break
+            }
+            return value
+        }
+    }
 
     uuidv4() {
         return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
@@ -88,7 +133,7 @@ class Handler {
         );
     }
 
-    addEvents(category) {
+    processCategory(category) {
         console.log('Adding tests to group [' + category.name + ']')
         var requests = category.item
         for (var i = 0; i < requests.length; i++) {
@@ -96,6 +141,7 @@ class Handler {
             this.cleanOASPathVariables(request.request)
             this.cleanOASBodyVariables(request.request)
             this.cleanOASQueryParams(request.request)
+            this.cleanOASHeaderVariables(request.request)
             console.log('Adding tests to request [' + request.name + ']')
             var events = [this.generate_event(request, 'test')]
             request.events = events;
@@ -181,44 +227,6 @@ class Handler {
         }
     }
 
-    parametrizeKey(key) {
-        var kebab = this.kebabize(key).replaceAll(SEPARATOR, '')
-        var collVar = this.COLL_VARS.filter(v => v.name == kebab)
-        if (collVar[0] != undefined && collVar.length > 0) {
-            collVar = collVar[0]
-            return this.parametrize(collVar.name)
-        }
-        return ''
-    }
-
-    convertValues(key, value) {
-        if (value != null) {
-            var type = this.getType(value)
-            console.log("Converting [" + type + "] for [" + key + "]")
-            switch (type) {
-                default:
-                    console.log("undefined", value)
-                case "number":
-                case "string":
-                    value = this.parametrizeKey(key)
-                    break
-                case "object":
-                    Object.keys(value).forEach(valueKey => {
-                        var convertedVal = this.convertValues(key + SEPARATOR + valueKey, value[valueKey])
-                        if (convertedVal != undefined && convertedVal != '') {
-                            value[valueKey] = convertedVal
-                        }
-                    })
-                    break
-                case "array":
-                    var items = value
-                    value = items.map(v => this.convertValues(key, v))
-                    break
-            }
-            return value
-        }
-    }
-
     cleanOASBodyVariables(request) {
         if (request.method == 'POST') {
             console.log('Cleaning body for [' + request.name + ']')
@@ -238,6 +246,20 @@ class Handler {
 
     }
 
+    cleanOASHeaderVariables(request){
+        var headers = request.header
+        headers.map(header => {
+            var key = header.key
+            console.log("Converting ["+key+"] value")
+            var value = this.convertValues('header-' + key, header.value)
+            if (value != '') {
+                console.log("Updated value for [" + key + "] to [" + value + "]")
+                header.value = value
+            }
+        })
+    }
+
+    // main
     convertCollection(converted_collection) {
         this.updateVariables(converted_collection)
         this.updateAuth(converted_collection)
@@ -245,7 +267,7 @@ class Handler {
         for (var i = 0; i < items.length; i++) {
             var category = items[i]
             if (category.item != undefined) {
-                this.addEvents(category)
+                this.processCategory(category)
             }
         }
         converted_collection.items = items.filter(i => i.item != undefined)
